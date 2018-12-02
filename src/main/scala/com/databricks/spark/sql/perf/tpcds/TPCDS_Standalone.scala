@@ -23,7 +23,8 @@ case class TpcdsStandaloneConfig(
   format: String = "parquet",
   shufflePartitions: Int = 200,
   partitionedTables: Boolean = true,
-  baseline: Option[Long] = None)
+  baseline: Option[Long] = None,
+  queries: Option[String] = None)
 
 object TPCDS_Standalone extends Logging {
 
@@ -59,6 +60,9 @@ object TPCDS_Standalone extends Logging {
       opt[Long]('c', "compare")
         .action((x, c) => c.copy(baseline = Some(x)))
         .text("the timestamp of the baseline experiment to compare with")
+      opt[String]('Q', "queries")
+        .action((x, c) => c.copy(queries = Some(x)))
+        .text("a comma-separated list of query names to run, e.g.: q1-v2.4,q72-v2.4")
       help("help")
         .text("prints this usage text")
     }
@@ -142,8 +146,20 @@ object TPCDS_Standalone extends Logging {
     spark.conf.set("spark.sql.shuffle.partitions", conf.shufflePartitions)
 
     val tpcds = new TPCDS(sqlContext = spark.sqlContext)
+
+    val queriesToRun = conf.queries.map { list =>
+      val queryNames = list.split(",").map { _.trim }.toSet
+      tpcds.tpcds2_4Queries.filter { query => queryNames.contains(query.name) }
+    }.getOrElse(tpcds.tpcds2_4Queries)
+
+    if (conf.queries.isDefined) {
+      logger.info(s"Running specified queries: ${queriesToRun.map(_.name).mkString(", ")}")
+    } else {
+      logger.info(s"Running all TPC-DS queries.")
+    }
+
     val experiment = tpcds.runExperiment(
-      tpcds.tpcds2_4Queries,
+      queriesToRun,
       iterations = conf.iterations,
       resultLocation = conf.outputLocation,
       tags = Map(
